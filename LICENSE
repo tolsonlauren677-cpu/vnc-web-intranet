@@ -1,0 +1,23 @@
+Mozilla Public License Version 2.0
+==================================
+
+The original code in this directory is released under the Mozilla Public
+License, version 2.0 (MPL-2.0), unless a file or directory contains a more
+specific license notice.
+
+Copyright (c) 2026 Aaco.
+
+The complete text of the MPL-2.0 is available at:
+https://www.mozilla.org/MPL/2.0/
+
+This repository also contains third-party code. In particular, the bundled
+noVNC files retain their original copyright and license notices in:
+
+  static/novnc/LICENSE.txt
+
+The bundled pako library retains its MIT license in:
+
+  static/novnc/vendor/pako/LICENSE
+
+Those third-party files are governed by their respective licenses. Nothing in
+this file replaces or removes those notices.

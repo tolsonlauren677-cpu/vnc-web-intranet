@@ -1,0 +1,2553 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>VNC Web Client</title>
+    <link rel="icon" href="{{ url_for('static', filename='icon.ico') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="app-shell">
+        <aside id="sidebar" class="sidebar">
+            <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-label="展开或收起左侧控制栏">
+                控制栏
+            </button>
+
+            <div class="sidebar-scroll">
+                <div class="brand">
+                    <div class="brand-mark">VNC</div>
+                    <div>
+                        <h1>Web 客户端</h1>
+                        <p>noVNC + WebSocket 代理</p>
+                    </div>
+                </div>
+
+                <form id="connectionForm" class="card form-card">
+                    <div class="toolbar-main">
+                        <div class="toolbar-title-row">
+                            <button id="side-connectionStatusBtn" class="connection-status-btn connection-status-idle" type="button">
+                                连接状态: 空闲
+                            </button>
+                            <button id="side-hidden-Btn" class="connection-status-btn connection-status-idle" type="button">
+                                隐藏
+                            </button>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label for="hostInput">目标主机</label>
+                        <input id="hostInput" type="text" value="{{ default_ip }}" placeholder="例如 192.168.1.3">
+                    </div>
+
+                    <div class="field-row">
+                        <div class="field">
+                            <label for="portInput">端口</label>
+                            <input id="portInput" type="number" min="1" max="65535" value="{{ default_port }}">
+                        </div>
+
+                        <div class="field">
+                            <label for="passwordInput">密码</label>
+                            <div class="password-wrap">
+                                <input id="passwordInput" type="password" value="{{ saved_password }}" placeholder="VNC 密码">
+                                <button id="togglePasswordBtn" type="button" class="icon-button" aria-label="显示或隐藏密码">显示</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="options">
+                        <label class="check">
+                            <input id="savePassword" type="checkbox" {% if saved_password %}checked{% endif %}>
+                            <span>保存密码</span>
+                        </label>
+                        <label class="check">
+                            <input id="autoConnect" type="checkbox" {% if auto_connect %}checked{% endif %}>
+                            <span>打开页面后自动连接</span>
+                        </label>
+                    </div>
+
+                    <div class="actions">
+                        <button class="button primary" type="submit" id="connectBtn">连接</button>
+                        <button class="button" type="button" id="disconnectBtn" disabled>断开</button>
+                        <button class="button ghost" type="button" id="testBtn">测试</button>
+                    </div>
+                </form>
+
+                <section class="card compact-card">
+                    <div class="section-head">
+                        <h2>状态</h2>
+                        <span id="statusBadge" class="badge badge-idle">空闲</span>
+                    </div>
+                    <p id="statusMessage" class="status-text">等待连接。</p>
+                    <p class="status-meta">
+                        WebSocket 代理:
+                        <code>{{ proxy_path }}</code>
+                        on
+                        <code>{{ proxy_port }}</code>
+                    </p>
+                </section>
+
+                <section class="card compact-card">
+                    <div class="section-head">
+                        <h2>最近连接</h2>
+                        <button id="clearRecentBtn" type="button" class="text-button">清空</button>
+                    </div>
+                    <div id="recentConnections" class="recent-list"></div>
+                </section>
+            </div>
+        </aside>
+
+        <main class="workspace">
+            <header class="toolbar">
+                <div class="toolbar-main">
+                    <div class="toolbar-title-row">
+                        <div id="desktopName" class="desktop-title">未连接</div>
+                        <button id="connectionStatusBtn" class="connection-status-btn connection-status-idle" type="button">
+                            连接状态: 空闲
+                        </button>
+                    </div>
+                </div>
+
+                <div class="toolbar-actions">
+                    <div id="quickActionsWrap" class="quick-actions">
+                        <button id="quickActionsBtn" class="button small" type="button" aria-haspopup="true" aria-expanded="false">
+                            快捷操作
+                        </button>
+                        <div id="quickActionsMenu" class="quick-actions-menu" role="menu" aria-hidden="true">
+                            <button id="reconnectBtn" class="quick-action-item" type="button" role="menuitem">重新连接</button>
+                            <button id="explorerBtn" class="quick-action-item" type="button" role="menuitem" disabled>资源管理器</button>
+                            <button id="controlPanelBtn" class="quick-action-item" type="button" role="menuitem" disabled>控制面板</button>
+                            <button id="cmdBtn" class="quick-action-item" type="button" role="menuitem" disabled>CMD</button>
+                            <button id="adminCmdBtn" class="quick-action-item" type="button" role="menuitem" disabled>管理员 CMD</button>
+                            <button id="desktopBtn" class="quick-action-item" type="button" role="menuitem" disabled>回到桌面</button>
+                            <button id="cadBtn" class="quick-action-item" type="button" role="menuitem" disabled>Ctrl+Alt+Del</button>
+                        </div>
+                    </div>
+                    <button id="clipboardViewBtn" class="button small" type="button">查看剪贴板</button>
+                    <label class="check">
+                        <input id="clipboardSyncToggle" type="checkbox" checked>
+                        <span>同步剪贴板(勾选时无法复制文件)</span>
+                    </label>
+                    <button id="customPathBtn" class="button small" type="button" disabled>打开自定义路径</button>
+                    <button id="customLinkBtn" class="button small accent" type="button" disabled>打开自定义链接</button>
+                    <button id="fullscreenBtn" class="button small" type="button">全屏</button>
+                    <button id="exportDataBtn" class="button small" type="button">导出数据</button>
+                    <button id="importDataBtn" class="button small" type="button">导入数据</button>
+                    <input id="importDataFile" type="file" accept=".json" hidden>
+                </div>
+            </header>
+
+            <section class="viewer-card">
+                <div id="screen" class="screen" aria-label="VNC 远程桌面"></div>
+                <div id="overlay" class="overlay visible">
+                    <div class="overlay-panel">
+                        <h2 id="overlayTitle">等待连接</h2>
+                        <p id="overlayText">输入主机地址后点击“连接”，浏览器会通过 noVNC 连接远程桌面。</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <div id="pathModal" class="path-modal" aria-hidden="true">
+        <div id="pathModalBackdrop" class="path-modal-backdrop"></div>
+        <div class="path-modal-panel" role="dialog" aria-modal="true" aria-labelledby="pathModalTitle">
+            <div class="section-head modal-head">
+                <div>
+                    <h2 id="pathModalTitle">自定义路径</h2>
+                    <p class="modal-subtitle">支持本地路径和共享路径，例如 <code>C:\Work</code> 或 <code>\\server\share</code></p>
+                </div>
+                <button id="closePathModalBtn" type="button" class="text-button">关闭</button>
+            </div>
+
+            <form id="pathForm" class="path-form">
+                <div class="field path-name-field">
+                    <label for="pathLabelInput">显示名称</label>
+                    <input id="pathLabelInput" type="text" placeholder="例如 项目共享盘">
+                </div>
+
+                <div class="field path-command-field">
+                    <label for="pathValueInput">路径</label>
+                    <input id="pathValueInput" type="text" placeholder="例如 \\server\share 或 D:\Data">
+                </div>
+
+                <div class="field path-group-field">
+                    <label for="pathGroupInput">分组</label>
+                    <input id="pathGroupInput" type="text" placeholder="默认：未分组">
+                </div>
+
+                <button id="executePathBtn" class="button accent" type="button">仅执行</button>
+                <button id="addPathBtn" class="button primary" type="submit">新增路径</button>
+                <button id="saveAsPathBtn" class="button" type="button" hidden>另存</button>
+                <button id="cancelEditPathBtn" class="button ghost" type="button" hidden>取消编辑</button>
+                <button id="addPathArgBtn" class="button" type="button">添加参数</button>
+            </form>
+            <div id="pathArgsList" class="link-args-list"></div>
+
+            <div class="field-row">
+                <div class="field">
+                    <label for="pathSearchInput">搜索</label>
+                    <input id="pathSearchInput" type="text" placeholder="按名称或路径搜索">
+                </div>
+                <div class="field">
+                    <label for="pathGroupFilter">分组筛选</label>
+                    <select id="pathGroupFilter"></select>
+                </div>
+            </div>
+
+            <div id="savedPaths" class="saved-paths"></div>
+        </div>
+    </div>
+
+    <div id="linkModal" class="path-modal" aria-hidden="true">
+        <div id="linkModalBackdrop" class="path-modal-backdrop"></div>
+        <div class="path-modal-panel" role="dialog" aria-modal="true" aria-labelledby="linkModalTitle">
+            <div class="section-head modal-head">
+                <div>
+                    <h2 id="linkModalTitle">自定义链接</h2>
+                    <p class="modal-subtitle">支持网址和自定义命令，例如 <code>https://example.com</code> 或 <code>notepad</code></p>
+                </div>
+                <button id="closeLinkModalBtn" type="button" class="text-button">关闭</button>
+            </div>
+
+            <form id="linkForm" class="path-form">
+                <div class="field link-name-field">
+                    <label for="linkLabelInput">显示名称</label>
+                    <input id="linkLabelInput" type="text" placeholder="例如 示例网站">
+                </div>
+
+                <div class="field link-command-field">
+                    <label for="linkValueInput">链接/命令</label>
+                    <input id="linkValueInput" type="text" placeholder="例如 https://example.com 或 notepad">
+                </div>
+
+                <div class="field link-group-field">
+                    <label for="linkGroupInput">分组</label>
+                    <input id="linkGroupInput" type="text" placeholder="默认：未分组">
+                </div>
+
+                <button id="executeLinkBtn" class="button accent" type="button">仅执行</button>
+                <button id="addLinkBtn" class="button primary" type="submit">新增链接</button>
+                <button id="saveAsLinkBtn" class="button" type="button" hidden>另存</button>
+                <button id="cancelEditLinkBtn" class="button ghost" type="button" hidden>取消编辑</button>
+                <button id="addLinkArgBtn" class="button" type="button">添加参数</button>
+            </form>
+            <div id="linkArgsList" class="link-args-list"></div>
+
+            <div class="field-row">
+                <div class="field">
+                    <label for="linkSearchInput">搜索</label>
+                    <input id="linkSearchInput" type="text" placeholder="按名称或链接搜索">
+                </div>
+                <div class="field">
+                    <label for="linkGroupFilter">分组筛选</label>
+                    <select id="linkGroupFilter"></select>
+                </div>
+            </div>
+
+            <div id="savedLinks" class="saved-paths"></div>
+        </div>
+    </div>
+
+    <div id="clipboardModal" class="path-modal" aria-hidden="true">
+        <div id="clipboardModalBackdrop" class="path-modal-backdrop"></div>
+        <div class="path-modal-panel" role="dialog" aria-modal="true" aria-labelledby="clipboardModalTitle">
+            <div class="section-head modal-head">
+                <div>
+                    <h2 id="clipboardModalTitle">剪贴板内容</h2>
+                    <p class="modal-subtitle">显示 VNC 设备的剪贴板内容</p>
+                </div>
+                <button id="closeClipboardModalBtn" type="button" class="text-button">关闭</button>
+            </div>
+
+            <div class="field">
+                <label for="clipboardContent">剪贴板内容</label>
+                <textarea id="clipboardContent" class="input" rows="10" readonly placeholder="剪贴板为空或无法获取"></textarea>
+            </div>
+
+            <div class="modal-footer">
+                <button id="refreshClipboardBtn" class="button primary" type="button">刷新</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toastContainer" class="toast-container" aria-live="polite"></div>
+
+    <script type="module">
+        import RFB from "{{ url_for('static', filename='novnc/core/rfb.js') }}";
+        import KeyTable from "{{ url_for('static', filename='novnc/core/input/keysym.js') }}";
+
+        const config = {
+            proxyPort: {{ proxy_port | tojson }},
+            proxyPath: {{ proxy_path | tojson }},
+            autoConnect: {{ auto_connect | tojson }},
+        };
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const customName = urlParams.get("name");
+
+        const RECENT_CONNECTIONS_KEY = "vnc_recent_connections";
+        const CUSTOM_PATHS_KEY = "vnc_custom_paths";
+        const CUSTOM_LINKS_KEY = "vnc_custom_links";
+        const SAVED_PASSWORDS_KEY = "vnc_saved_passwords";
+        const DEFAULT_GROUP = "未分组";
+        const ALL_GROUP_VALUE = "__all__";
+
+        const elements = {
+            sidebar: document.getElementById("sidebar"),
+            sidebarToggle: document.getElementById("sidebarToggle"),
+            toolbar: document.querySelector(".toolbar"),
+            connectionForm: document.getElementById("connectionForm"),
+            hostInput: document.getElementById("hostInput"),
+            portInput: document.getElementById("portInput"),
+            passwordInput: document.getElementById("passwordInput"),
+            savePassword: document.getElementById("savePassword"),
+            autoConnect: document.getElementById("autoConnect"),
+            connectBtn: document.getElementById("connectBtn"),
+            disconnectBtn: document.getElementById("disconnectBtn"),
+            testBtn: document.getElementById("testBtn"),
+            statusBadge: document.getElementById("statusBadge"),
+            statusMessage: document.getElementById("statusMessage"),
+            recentConnections: document.getElementById("recentConnections"),
+            clearRecentBtn: document.getElementById("clearRecentBtn"),
+            quickActionsWrap: document.getElementById("quickActionsWrap"),
+            quickActionsBtn: document.getElementById("quickActionsBtn"),
+            quickActionsMenu: document.getElementById("quickActionsMenu"),
+            reconnectBtn: document.getElementById("reconnectBtn"),
+            connectionStatusBtn: document.getElementById("connectionStatusBtn"),
+            sideConnectionStatusBtn: document.getElementById("side-connectionStatusBtn"),
+            sideHiddenBtn: document.getElementById("side-hidden-Btn"),
+            explorerBtn: document.getElementById("explorerBtn"),
+            controlPanelBtn: document.getElementById("controlPanelBtn"),
+            cmdBtn: document.getElementById("cmdBtn"),
+            adminCmdBtn: document.getElementById("adminCmdBtn"),
+            desktopBtn: document.getElementById("desktopBtn"),
+            customPathBtn: document.getElementById("customPathBtn"),
+            customLinkBtn: document.getElementById("customLinkBtn"),
+            cadBtn: document.getElementById("cadBtn"),
+            fullscreenBtn: document.getElementById("fullscreenBtn"),
+            desktopName: document.getElementById("desktopName"),
+            screen: document.getElementById("screen"),
+            overlay: document.getElementById("overlay"),
+            overlayTitle: document.getElementById("overlayTitle"),
+            overlayText: document.getElementById("overlayText"),
+            togglePasswordBtn: document.getElementById("togglePasswordBtn"),
+            clipboardSyncToggle: document.getElementById("clipboardSyncToggle"),
+            viewerCard: document.querySelector(".viewer-card"),
+            pathModal: document.getElementById("pathModal"),
+            pathModalBackdrop: document.getElementById("pathModalBackdrop"),
+            closePathModalBtn: document.getElementById("closePathModalBtn"),
+            pathForm: document.getElementById("pathForm"),
+            pathLabelInput: document.getElementById("pathLabelInput"),
+            pathValueInput: document.getElementById("pathValueInput"),
+            pathArgsList: document.getElementById("pathArgsList"),
+            addPathArgBtn: document.getElementById("addPathArgBtn"),
+            pathGroupInput: document.getElementById("pathGroupInput"),
+            addPathBtn: document.getElementById("addPathBtn"),
+            saveAsPathBtn: document.getElementById("saveAsPathBtn"),
+            cancelEditPathBtn: document.getElementById("cancelEditPathBtn"),
+            pathSearchInput: document.getElementById("pathSearchInput"),
+            pathGroupFilter: document.getElementById("pathGroupFilter"),
+            savedPaths: document.getElementById("savedPaths"),
+            linkModal: document.getElementById("linkModal"),
+            linkModalBackdrop: document.getElementById("linkModalBackdrop"),
+            closeLinkModalBtn: document.getElementById("closeLinkModalBtn"),
+            linkForm: document.getElementById("linkForm"),
+            linkLabelInput: document.getElementById("linkLabelInput"),
+            linkValueInput: document.getElementById("linkValueInput"),
+            linkArgsList: document.getElementById("linkArgsList"),
+            addLinkArgBtn: document.getElementById("addLinkArgBtn"),
+            linkGroupInput: document.getElementById("linkGroupInput"),
+            addLinkBtn: document.getElementById("addLinkBtn"),
+            saveAsLinkBtn: document.getElementById("saveAsLinkBtn"),
+            cancelEditLinkBtn: document.getElementById("cancelEditLinkBtn"),
+            linkSearchInput: document.getElementById("linkSearchInput"),
+            linkGroupFilter: document.getElementById("linkGroupFilter"),
+            savedLinks: document.getElementById("savedLinks"),
+            clipboardViewBtn: document.getElementById("clipboardViewBtn"),
+            clipboardModal: document.getElementById("clipboardModal"),
+            clipboardModalBackdrop: document.getElementById("clipboardModalBackdrop"),
+            closeClipboardModalBtn: document.getElementById("closeClipboardModalBtn"),
+            refreshClipboardBtn: document.getElementById("refreshClipboardBtn"),
+            clipboardContent: document.getElementById("clipboardContent"),
+            executePathBtn: document.getElementById("executePathBtn"),
+            executeLinkBtn: document.getElementById("executeLinkBtn"),
+            exportDataBtn: document.getElementById("exportDataBtn"),
+            importDataBtn: document.getElementById("importDataBtn"),
+            importDataFile: document.getElementById("importDataFile")
+        };
+
+        let rfb = null;
+        let currentConnection = null;
+        let lastSecurityFailure = "";
+        let viewerKeyboardActive = false;
+        let keyboardLockNoticeShown = false;
+        let sidebarOpen = true;
+        const originalTitle = document.title;
+        let customPaths = loadCustomPaths();
+        let customLinks = loadCustomLinks();
+        let lastClipboardText = "";
+        let clipboardToastAt = 0;
+        let pendingRemoteClipboardText = "";
+        let interceptingPasteShortcut = false;
+        let clipboardSyncDisabled = false;
+        let quickActionsOpen = false;
+        let legacyClipboardEncodingHint = "gb18030";
+        let pathEditingId = null;
+        let linkEditingId = null;
+        let draggingPathId = null;
+        let draggingLinkId = null;
+        const EXTENDED_CLIPBOARD_FORMAT_TEXT = 1;
+        const EXTENDED_CLIPBOARD_ACTION_NOTIFY = 1 << 27;
+        
+        if (customName) {
+            document.title = customName;
+        }
+
+        function sleep(ms) {
+            return new Promise((resolve) => window.setTimeout(resolve, ms));
+        }
+
+        function syncViewportHeight() {
+            document.documentElement.style.setProperty("--app-height", `${window.innerHeight}px`);
+            window.requestAnimationFrame(syncToolbarOffset);
+        }
+
+        function syncToolbarOffset() {
+            const rect = elements.toolbar?.getBoundingClientRect();
+            if (!rect) {
+                return;
+            }
+
+            const offset = Math.max(72, Math.ceil(rect.top + rect.height + 14));
+            document.documentElement.style.setProperty("--live-toolbar-offset", `${offset}px`);
+        }
+
+        function setStatus(message, state = "idle") {
+            const label = ({
+                idle: "空闲",
+                connecting: "连接中",
+                connected: "已连接",
+                error: "错误",
+                disconnected: "已断开",
+            })[state] || "状态";
+
+            elements.statusMessage.textContent = message;
+            elements.statusBadge.textContent = label;
+            elements.statusBadge.className = `badge badge-${state}`;
+            elements.connectionStatusBtn.textContent = `连接状态: ${label}`;
+            elements.connectionStatusBtn.className = `connection-status-btn connection-status-${state}`;
+            elements.sideConnectionStatusBtn.textContent = `连接状态: ${label}`;
+            elements.sideConnectionStatusBtn.className = `connection-status-btn connection-status-${state}`;
+            window.requestAnimationFrame(syncToolbarOffset);
+        }
+
+        function showOverlay(title, message) {
+            elements.overlayTitle.textContent = title;
+            elements.overlayText.textContent = message;
+            elements.overlay.classList.add("visible");
+        }
+
+        function hideOverlay() {
+            elements.overlay.classList.remove("visible");
+        }
+
+        function toast(message, kind = "info") {
+            const node = document.createElement("div");
+            node.className = `toast toast-${kind}`;
+            node.textContent = message;
+            document.getElementById("toastContainer").appendChild(node);
+
+            window.setTimeout(() => {
+                node.classList.add("toast-hide");
+                window.setTimeout(() => node.remove(), 180);
+            }, 3200);
+        }
+
+        function maybeClipboardToast(message) {
+            const now = Date.now();
+            if ((now - clipboardToastAt) < 1200) {
+                return;
+            }
+            clipboardToastAt = now;
+            toast(message);
+        }
+
+        function buildWebSocketUrl(host, port) {
+            const scheme = window.location.protocol === "https:" ? "wss" : "ws";
+            const proxyHost = window.location.hostname || "127.0.0.1";
+            const url = new URL(`${scheme}://${proxyHost}:${config.proxyPort}${config.proxyPath}`);
+            url.searchParams.set("host", host);
+            url.searchParams.set("port", String(port));
+            return url.toString();
+        }
+
+        function getViewerCanvas() {
+            return elements.screen.querySelector("canvas");
+        }
+
+        function focusRemoteDesktop() {
+            if (!rfb) {
+                return;
+            }
+
+            try {
+                rfb.focus({ preventScroll: true });
+            } catch {
+                try {
+                    rfb.focus();
+                } catch {
+                    getViewerCanvas()?.focus?.({ preventScroll: true });
+                }
+            }
+        }
+
+        function setViewerKeyboardMode(active) {
+            viewerKeyboardActive = Boolean(active && rfb);
+            if (viewerKeyboardActive) {
+                focusRemoteDesktop();
+            }
+        }
+
+        function isLocalEditingTarget(target) {
+            return target instanceof HTMLElement
+                && Boolean(target.closest("input, textarea, select, button, [contenteditable='true']"));
+        }
+
+        function isModalVisible(modalElement) {
+            if (!modalElement) {
+                return false;
+            }
+            return modalElement.classList.contains("visible")
+                && modalElement.getAttribute("aria-hidden") !== "true";
+        }
+
+        function isCustomPasteModalOpen() {
+            return isModalVisible(elements.pathModal) || isModalVisible(elements.linkModal);
+        }
+
+        function shouldTrapKeyboardEvent(event) {
+            if (isCustomPasteModalOpen()) {
+                return false;
+            }
+            if (isClipboardPasteShortcut(event) && clipboardSyncDisabled) {
+                return false;
+            }
+            return Boolean(rfb && viewerKeyboardActive && !isLocalEditingTarget(event.target));
+        }
+
+        function isClipboardPasteShortcut(event) {
+            if (event.type !== "keydown") {
+                return false;
+            }
+
+            const key = String(event.key || "").toLowerCase();
+            return (event.ctrlKey || event.metaKey) && !event.altKey && key === "v";
+        }
+
+        function isPasteShortcutFollowup(event) {
+            if (!interceptingPasteShortcut) {
+                return false;
+            }
+
+            const key = String(event.key || "").toLowerCase();
+            return key === "v" || key === "control" || key === "meta";
+        }
+
+        function trapKeyboardEvent(event) {
+            if (!shouldTrapKeyboardEvent(event)) {
+                return;
+            }
+
+            if (isPasteShortcutFollowup(event)) {
+                if (event.type === "keyup" && interceptingPasteShortcut) {
+                    interceptingPasteShortcut = false;
+                    void syncLocalClipboardToRemote();
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                return;
+            }
+
+            if (isClipboardPasteShortcut(event)) {
+                event.stopPropagation();
+                interceptingPasteShortcut = true;
+                // Prefer the browser paste event clipboardData path for better compatibility.
+                return;
+            }
+            event.preventDefault();
+            focusRemoteDesktop();
+        }
+
+        async function writeTextToLocalClipboard(text) {
+            if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") {
+                return false;
+            }
+
+            try {
+                await navigator.clipboard.writeText(text);
+                return true;
+            } catch {
+                return false;
+            }
+        }
+
+        async function readTextFromLocalClipboard() {
+            if (!navigator.clipboard || typeof navigator.clipboard.readText !== "function") {
+                return null;
+            }
+
+            try {
+                return await navigator.clipboard.readText();
+            } catch {
+                return null;
+            }
+        }
+
+        function canUseExtendedClipboard() {
+            if (!rfb) {
+                return false;
+            }
+
+            const formats = rfb._clipboardServerCapabilitiesFormats || {};
+            const actions = rfb._clipboardServerCapabilitiesActions || {};
+            return Boolean(formats[EXTENDED_CLIPBOARD_FORMAT_TEXT] && actions[EXTENDED_CLIPBOARD_ACTION_NOTIFY]);
+        }
+
+        function bytesToBase64(bytes) {
+            let binary = "";
+            for (const value of bytes) {
+                binary += String.fromCharCode(value);
+            }
+            return btoa(binary);
+        }
+
+        function base64ToBytes(base64Text) {
+            const binary = atob(base64Text);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+            return bytes;
+        }
+
+        function latin1StringToBytes(text) {
+            const bytes = new Uint8Array(text.length);
+            for (let i = 0; i < text.length; i++) {
+                bytes[i] = text.charCodeAt(i) & 0xff;
+            }
+            return bytes;
+        }
+
+        async function encodeLegacyClipboardBytes(text) {
+            let response;
+            let data;
+            try {
+                response = await fetch("/api/clipboard/legacy_encode", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        text,
+                        encoding: legacyClipboardEncodingHint,
+                    }),
+                });
+                data = await response.json();
+            } catch {
+                throw new Error("编码服务不可用。");
+            }
+
+            if (!response.ok || !data.success || typeof data.bytes_base64 !== "string") {
+                throw new Error(data?.message || "远端剪贴板编码失败。");
+            }
+
+            if (typeof data.encoding === "string" && data.encoding) {
+                legacyClipboardEncodingHint = data.encoding;
+            }
+
+            return base64ToBytes(data.bytes_base64);
+        }
+
+        async function decodeLegacyClipboardText(rawText) {
+            if (!rawText || canUseExtendedClipboard()) {
+                return rawText;
+            }
+
+            // Already a Unicode string, no need to decode legacy bytes.
+            if ([...rawText].some((char) => char.codePointAt(0) > 0xff)) {
+                return rawText;
+            }
+
+            const bytes = latin1StringToBytes(rawText);
+            let response;
+            let data;
+            try {
+                response = await fetch("/api/clipboard/legacy_decode", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        bytes_base64: bytesToBase64(bytes),
+                        encoding: legacyClipboardEncodingHint,
+                    }),
+                });
+                data = await response.json();
+            } catch {
+                return rawText;
+            }
+
+            if (!response.ok || !data.success || typeof data.text !== "string") {
+                return rawText;
+            }
+
+            if (typeof data.encoding === "string" && data.encoding) {
+                legacyClipboardEncodingHint = data.encoding;
+            }
+
+            return data.text;
+        }
+
+        async function pushTextToRemoteClipboard(text, options = {}) {
+            if (!rfb || clipboardSyncDisabled) {
+                return false;
+            }
+
+            lastClipboardText = text;
+
+            if (canUseExtendedClipboard()) {
+                rfb.clipboardPasteFrom(text);
+            } else {
+                try {
+                    const encodedBytes = await encodeLegacyClipboardBytes(text);
+                    if (!rfb || !rfb._sock) {
+                        return false;
+                    }
+                    RFB.messages.clientCutText(rfb._sock, encodedBytes);
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : String(error);
+                    toast(`同步到远端剪贴板失败: ${message}`, "error");
+                    return false;
+                }
+            }
+
+            focusRemoteDesktop();
+            if (!options.quiet) {
+                maybeClipboardToast("本地剪贴板已同步到远端。");
+            }
+            return true;
+        }
+
+
+        async function sendRemotePasteShortcut() {
+            await sendChord([
+                { keysym: KeyTable.XK_Control_L, code: "ControlLeft" },
+                { keysym: charToKeysym("v"), code: "KeyV" },
+            ]);
+        }
+
+        async function performRemotePaste(text, options = {}) {
+            const ok = await pushTextToRemoteClipboard(text, options);
+            if (!ok) {
+                return false;
+            }
+
+            await sleep(60);
+            await sendRemotePasteShortcut();
+            return true;
+        }
+
+        async function syncLocalClipboardToRemote() {
+            if (clipboardSyncDisabled) {
+                return false;
+            }
+            const text = await readTextFromLocalClipboard();
+            if (!text) {
+                toast("读取本地剪贴板失败，或剪贴板当前没有文本。", "error");
+                return false;
+            }
+
+            return performRemotePaste(text);
+        }
+
+
+        async function flushPendingRemoteClipboard() {
+            if (!pendingRemoteClipboardText) {
+                return;
+            }
+
+            const text = pendingRemoteClipboardText;
+            const ok = await writeTextToLocalClipboard(text);
+            if (ok) {
+                pendingRemoteClipboardText = "";
+                maybeClipboardToast("远端剪贴板已同步到本地。");
+            }
+        }
+
+        async function handleRemoteClipboard(event) {
+            if (clipboardSyncDisabled) {
+                return;
+            }
+            const rawText = event.detail?.text ?? "";
+            const text = await decodeLegacyClipboardText(rawText);
+            lastClipboardText = text;
+            const ok = await writeTextToLocalClipboard(text);
+            if (ok) {
+                pendingRemoteClipboardText = "";
+                maybeClipboardToast("远端剪贴板已同步到本地。");
+            } else {
+                pendingRemoteClipboardText = text;
+                toast("远端剪贴板已收到。浏览器暂未授权写入本地，下一次点击页面时会重试同步。", "error");
+            }
+        }
+
+        function handlePasteEvent(event) {
+            if (!rfb || !viewerKeyboardActive || clipboardSyncDisabled || isCustomPasteModalOpen()) {
+                interceptingPasteShortcut = false;
+                return;
+            }
+
+            if (isLocalEditingTarget(event.target)) {
+                interceptingPasteShortcut = false;
+                return;
+            }
+
+            const text = event.clipboardData?.getData("text/plain");
+            if (!text) {
+                if (interceptingPasteShortcut) {
+                    interceptingPasteShortcut = false;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    void syncLocalClipboardToRemote();
+                }
+                return;
+            }
+
+            event.preventDefault();
+            event.stopPropagation();
+            interceptingPasteShortcut = false;
+            void performRemotePaste(text);
+        }
+
+        async function requestKeyboardLock() {
+            if (!rfb || !document.fullscreenElement || !window.isSecureContext) {
+                return;
+            }
+
+            const keyboard = navigator.keyboard;
+            if (!keyboard || typeof keyboard.lock !== "function") {
+                if (!keyboardLockNoticeShown) {
+                    keyboardLockNoticeShown = true;
+                    toast("当前浏览器不支持键盘锁定，部分系统快捷键仍会由本机处理。");
+                }
+                return;
+            }
+
+            try {
+                await keyboard.lock();
+            } catch {
+                if (!keyboardLockNoticeShown) {
+                    keyboardLockNoticeShown = true;
+                    toast("键盘锁定未启用。进入全屏后，更多系统快捷键可以被远程桌面接管。");
+                }
+            }
+        }
+
+        function releaseKeyboardLock() {
+            const keyboard = navigator.keyboard;
+            if (keyboard && typeof keyboard.unlock === "function") {
+                try {
+                    keyboard.unlock();
+                } catch {
+                    // Ignore release failures.
+                }
+            }
+        }
+
+        function setSidebarOpen(open) {
+            sidebarOpen = Boolean(open);
+            document.body.classList.toggle("sidebar-open", sidebarOpen);
+            elements.sideConnectionStatusBtn.title = sidebarOpen ? "收起左侧控制栏" : "展开左侧控制栏";
+            elements.connectionStatusBtn.title = sidebarOpen ? "收起左侧控制栏" : "展开左侧控制栏";
+            window.requestAnimationFrame(syncToolbarOffset);
+        }
+
+        function updateSessionLayout(connected) {
+            document.body.classList.toggle("session-live", connected);
+            if (connected) {
+                setSidebarOpen(false);
+            } else {
+                setSidebarOpen(true);
+                closePathModal();
+                closeLinkModal();
+            }
+            window.requestAnimationFrame(syncToolbarOffset);
+        }
+
+        function getRecentConnections() {
+            try {
+                const raw = localStorage.getItem(RECENT_CONNECTIONS_KEY);
+                const parsed = raw ? JSON.parse(raw) : [];
+                return Array.isArray(parsed) ? parsed : [];
+            } catch {
+                return [];
+            }
+        }
+
+        function saveRecentConnection(host, port, name) {
+            const items = getRecentConnections()
+                .filter((entry) => entry.host !== host || Number(entry.port) !== Number(port));
+
+            items.unshift({ host, port: Number(port), name });
+            localStorage.setItem(RECENT_CONNECTIONS_KEY, JSON.stringify(items.slice(0, 10)));
+            renderRecentConnections();
+        }
+
+        function renderRecentConnections() {
+            const items = getRecentConnections();
+            elements.recentConnections.replaceChildren();
+
+            if (!items.length) {
+                const empty = document.createElement("p");
+                empty.className = "empty-state";
+                empty.textContent = "还没有历史连接。";
+                elements.recentConnections.appendChild(empty);
+                return;
+            }
+
+            items.forEach((entry) => {
+                const row = document.createElement("div");
+                row.className = "recent-item";
+
+                const target = document.createElement("button");
+                target.type = "button";
+                target.className = "recent-target";
+                target.textContent = entry.name ? `${entry.name}:${entry.host}` : `${entry.host}:${entry.port}`;
+                target.addEventListener("click", async () => {
+                    elements.hostInput.value = entry.host;
+                    elements.portInput.value = entry.port;
+                    await loadSavedPassword(entry.host);
+                    connectVNC();
+                });
+
+                row.appendChild(target);
+                elements.recentConnections.appendChild(row);
+            });
+        }
+
+        function loadCustomPaths() {
+            try {
+                const raw = localStorage.getItem(CUSTOM_PATHS_KEY);
+                const parsed = raw ? JSON.parse(raw) : [];
+                return Array.isArray(parsed) ? parsed.map(normalizePathEntryData).filter(Boolean) : [];
+            } catch {
+                return [];
+            }
+        }
+
+        function persistCustomPaths() {
+            localStorage.setItem(CUSTOM_PATHS_KEY, JSON.stringify(customPaths));
+        }
+
+        function loadCustomLinks() {
+            try {
+                const raw = localStorage.getItem(CUSTOM_LINKS_KEY);
+                const parsed = raw ? JSON.parse(raw) : [];
+                return Array.isArray(parsed) ? parsed.map(normalizeLinkEntryData).filter(Boolean) : [];
+            } catch {
+                return [];
+            }
+        }
+
+        function persistCustomLinks() {
+            localStorage.setItem(CUSTOM_LINKS_KEY, JSON.stringify(customLinks));
+        }
+
+        function normalizePathEntry(label, path) {
+            const trimmedPath = path.trim();
+            return {
+                id: (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
+                    ? crypto.randomUUID()
+                    : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                label: (label.trim() || trimmedPath),
+                path: trimmedPath,
+                argsList: [],
+                group: DEFAULT_GROUP,
+            };
+        }
+
+        function normalizeLinkEntry(label, link) {
+            const trimmedLink = link.trim();
+            return {
+                id: (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
+                    ? crypto.randomUUID()
+                    : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                label: (label.trim() || trimmedLink),
+                link: trimmedLink,
+                argsList: [],
+                group: DEFAULT_GROUP,
+            };
+        }
+
+        function normalizeGroupName(group) {
+            const name = typeof group === "string" ? group.trim() : "";
+            return name || DEFAULT_GROUP;
+        }
+
+        function normalizePathEntryData(entry) {
+            if (!entry || typeof entry !== "object") {
+                return null;
+            }
+            const path = typeof entry.path === "string" ? entry.path.trim() : "";
+            if (!path) {
+                return null;
+            }
+            const label = typeof entry.label === "string" ? entry.label.trim() : "";
+            let argsList = [];
+            if (Array.isArray(entry.argsList)) {
+                argsList = entry.argsList.map((item) => String(item ?? ""));
+            } else if (typeof entry.args === "string") {
+                argsList = splitEscapedArgs(entry.args);
+            }
+            return {
+                id: typeof entry.id === "string" && entry.id
+                    ? entry.id
+                    : ((typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
+                        ? crypto.randomUUID()
+                        : `${Date.now()}-${Math.random().toString(16).slice(2)}`),
+                label: label || path,
+                path,
+                argsList,
+                group: normalizeGroupName(entry.group),
+            };
+        }
+
+        function normalizeLinkEntryData(entry) {
+            if (!entry || typeof entry !== "object") {
+                return null;
+            }
+            const link = typeof entry.link === "string" ? entry.link.trim() : "";
+            if (!link) {
+                return null;
+            }
+            const label = typeof entry.label === "string" ? entry.label.trim() : "";
+            let argsList = [];
+            if (Array.isArray(entry.argsList)) {
+                argsList = entry.argsList.map((item) => String(item ?? ""));
+            } else if (typeof entry.args === "string") {
+                argsList = splitEscapedArgs(entry.args);
+            }
+            return {
+                id: typeof entry.id === "string" && entry.id
+                    ? entry.id
+                    : ((typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
+                        ? crypto.randomUUID()
+                        : `${Date.now()}-${Math.random().toString(16).slice(2)}`),
+                label: label || link,
+                link,
+                argsList,
+                group: normalizeGroupName(entry.group),
+            };
+        }
+
+        function splitEscapedArgs(rawText) {
+            const text = String(rawText ?? "");
+            if (!text) {
+                return [];
+            }
+            const items = [];
+            let current = "";
+            for (let i = 0; i < text.length; i += 1) {
+                const ch = text[i];
+                const next = text[i + 1];
+                if (ch === "\\" && next === ",") {
+                    current += ",";
+                    i += 1;
+                    continue;
+                }
+                if (ch === ",") {
+                    items.push(current);
+                    current = "";
+                    continue;
+                }
+                current += ch;
+            }
+            items.push(current);
+            return items;
+        }
+
+        function resolveLinkCommand(linkTemplate, argsList) {
+            const template = String(linkTemplate || "").trim();
+            const args = Array.isArray(argsList) ? argsList.map((item) => String(item ?? "")) : [];
+            const placeholderMatches = [...template.matchAll(/\$(\d+)/g)];
+            const placeholderIndexes = [...new Set(placeholderMatches.map((item) => Number(item[1])))]
+                .filter((value) => Number.isInteger(value) && value > 0)
+                .sort((a, b) => a - b);
+
+            const missing = placeholderIndexes.filter((index) => index > args.length);
+            const unusedArgs = [];
+            for (let i = 1; i <= args.length; i += 1) {
+                if (!placeholderIndexes.includes(i)) {
+                    unusedArgs.push(i);
+                }
+            }
+
+            if (missing.length || unusedArgs.length) {
+                const messages = [];
+                if (missing.length) {
+                    messages.push(`命令需要参数 $${missing.join(", $")}，但当前只提供了 ${args.length} 个参数`);
+                }
+                if (unusedArgs.length) {
+                    messages.push(`已提供的第 ${unusedArgs.join(", ")} 个参数未被命令使用`);
+                }
+                return { ok: false, message: messages.join("；") };
+            }
+
+            const command = template.replace(/\$(\d+)/g, (_, n) => args[Number(n) - 1] ?? "");
+            return { ok: true, command };
+        }
+
+        function resolvePathCommand(pathTemplate, argsList) {
+            const template = String(pathTemplate || "").trim();
+            const args = Array.isArray(argsList) ? argsList.map((item) => String(item ?? "")) : [];
+            const placeholderMatches = [...template.matchAll(/\$(\d+)/g)];
+            const placeholderIndexes = [...new Set(placeholderMatches.map((item) => Number(item[1])))]
+                .filter((value) => Number.isInteger(value) && value > 0)
+                .sort((a, b) => a - b);
+
+            const missing = placeholderIndexes.filter((index) => index > args.length);
+            const unusedArgs = [];
+            for (let i = 1; i <= args.length; i += 1) {
+                if (!placeholderIndexes.includes(i)) {
+                    unusedArgs.push(i);
+                }
+            }
+
+            if (missing.length || unusedArgs.length) {
+                const messages = [];
+                if (missing.length) {
+                    messages.push(`路径需要参数 $${missing.join(", $")}，但当前只提供了 ${args.length} 个参数`);
+                }
+                if (unusedArgs.length) {
+                    messages.push(`已提供的第 ${unusedArgs.join(", ")} 个参数未被路径使用`);
+                }
+                return { ok: false, message: messages.join("；") };
+            }
+
+            const path = template.replace(/\$(\d+)/g, (_, n) => args[Number(n) - 1] ?? "");
+            return { ok: true, path };
+        }
+
+        function updatePathFormEditingState() {
+            const editing = Boolean(pathEditingId);
+            elements.addPathBtn.textContent = editing ? "保存路径修改" : "新增路径";
+            elements.saveAsPathBtn.hidden = !editing;
+            elements.cancelEditPathBtn.hidden = !editing;
+        }
+
+        function updateLinkFormEditingState() {
+            const editing = Boolean(linkEditingId);
+            elements.addLinkBtn.textContent = editing ? "保存链接修改" : "新增链接";
+            elements.saveAsLinkBtn.hidden = !editing;
+            elements.cancelEditLinkBtn.hidden = !editing;
+        }
+
+        function resetPathEditing() {
+            pathEditingId = null;
+            elements.pathForm.reset();
+            renderPathArgsEditor([]);
+            elements.pathGroupInput.value = "";
+            updatePathFormEditingState();
+        }
+
+        function resetLinkEditing() {
+            linkEditingId = null;
+            elements.linkForm.reset();
+            renderLinkArgsEditor([]);
+            elements.linkGroupInput.value = "";
+            updateLinkFormEditingState();
+        }
+
+        function getLinkArgsFromEditor() {
+            return Array.from(elements.linkArgsList.querySelectorAll("input[data-link-arg-input]"))
+                .map((input) => input.value);
+        }
+
+        function getPathArgsFromEditor() {
+            return Array.from(elements.pathArgsList.querySelectorAll("input[data-path-arg-input]"))
+                .map((input) => input.value);
+        }
+
+        function renderPathArgsEditor(values) {
+            const args = Array.isArray(values) ? values.map((item) => String(item ?? "")) : [];
+            elements.pathArgsList.replaceChildren();
+            args.forEach((value, index) => {
+                const row = document.createElement("div");
+                row.className = "link-arg-row";
+
+                const tag = document.createElement("span");
+                tag.className = "link-arg-tag";
+                tag.textContent = `$${index + 1}`;
+
+                const input = document.createElement("input");
+                input.type = "text";
+                input.value = value;
+                input.placeholder = `参数 $${index + 1}`;
+                input.setAttribute("data-path-arg-input", "1");
+
+                const removeBtn = document.createElement("button");
+                removeBtn.type = "button";
+                removeBtn.className = "saved-path-delete";
+                removeBtn.textContent = "删除";
+                removeBtn.addEventListener("click", () => {
+                    const next = getPathArgsFromEditor();
+                    next.splice(index, 1);
+                    renderPathArgsEditor(next);
+                });
+
+                row.append(tag, input, removeBtn);
+                elements.pathArgsList.appendChild(row);
+            });
+        }
+
+        function normalizeCompareText(value) {
+            return String(value ?? "").trim().toLowerCase();
+        }
+
+        function sameArgsList(a, b) {
+            const left = Array.isArray(a) ? a.map((item) => String(item ?? "")) : [];
+            const right = Array.isArray(b) ? b.map((item) => String(item ?? "")) : [];
+            if (left.length !== right.length) {
+                return false;
+            }
+            for (let i = 0; i < left.length; i += 1) {
+                if (left[i] !== right[i]) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        function moveItemBefore(items, dragId, targetId) {
+            if (!dragId || !targetId || dragId === targetId) {
+                return items;
+            }
+            const fromIndex = items.findIndex((item) => item.id === dragId);
+            const toIndex = items.findIndex((item) => item.id === targetId);
+            if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
+                return items;
+            }
+            const next = [...items];
+            const [moved] = next.splice(fromIndex, 1);
+            const insertIndex = fromIndex < toIndex ? toIndex - 1 : toIndex;
+            next.splice(insertIndex, 0, moved);
+            return next;
+        }
+
+        function moveItemByPlacement(items, dragId, targetId, placeAfter = false) {
+            if (!placeAfter) {
+                return moveItemBefore(items, dragId, targetId);
+            }
+            const targetIndex = items.findIndex((item) => item.id === targetId);
+            if (targetIndex < 0) {
+                return items;
+            }
+            const nextTarget = items[targetIndex + 1];
+            if (!nextTarget) {
+                const fromIndex = items.findIndex((item) => item.id === dragId);
+                if (fromIndex < 0) {
+                    return items;
+                }
+                const next = [...items];
+                const [moved] = next.splice(fromIndex, 1);
+                next.push(moved);
+                return next;
+            }
+            return moveItemBefore(items, dragId, nextTarget.id);
+        }
+
+        function renderLinkArgsEditor(values) {
+            const args = Array.isArray(values) ? values.map((item) => String(item ?? "")) : [];
+            elements.linkArgsList.replaceChildren();
+            args.forEach((value, index) => {
+                const row = document.createElement("div");
+                row.className = "link-arg-row";
+
+                const tag = document.createElement("span");
+                tag.className = "link-arg-tag";
+                tag.textContent = `$${index + 1}`;
+
+                const input = document.createElement("input");
+                input.type = "text";
+                input.value = value;
+                input.placeholder = `参数 $${index + 1}`;
+                input.setAttribute("data-link-arg-input", "1");
+
+                const removeBtn = document.createElement("button");
+                removeBtn.type = "button";
+                removeBtn.className = "saved-path-delete";
+                removeBtn.textContent = "删除";
+                removeBtn.addEventListener("click", () => {
+                    const next = getLinkArgsFromEditor();
+                    next.splice(index, 1);
+                    renderLinkArgsEditor(next);
+                });
+
+                row.append(tag, input, removeBtn);
+                elements.linkArgsList.appendChild(row);
+            });
+        }
+
+        function updatePathGroupFilterOptions() {
+            const current = elements.pathGroupFilter.value || ALL_GROUP_VALUE;
+            const groups = Array.from(new Set(customPaths.map((entry) => normalizeGroupName(entry.group))));
+            const normalGroups = groups
+                .filter((group) => group !== DEFAULT_GROUP)
+                .sort((a, b) => a.localeCompare(b, "zh-CN"));
+            if (groups.includes(DEFAULT_GROUP)) {
+                normalGroups.push(DEFAULT_GROUP);
+            }
+            elements.pathGroupFilter.replaceChildren();
+            const all = document.createElement("option");
+            all.value = ALL_GROUP_VALUE;
+            all.textContent = "所有分组";
+            elements.pathGroupFilter.appendChild(all);
+            normalGroups.forEach((group) => {
+                const option = document.createElement("option");
+                option.value = group;
+                option.textContent = group;
+                elements.pathGroupFilter.appendChild(option);
+            });
+            elements.pathGroupFilter.value = [...elements.pathGroupFilter.options].some((o) => o.value === current) ? current : ALL_GROUP_VALUE;
+        }
+
+        function updateLinkGroupFilterOptions() {
+            const current = elements.linkGroupFilter.value || ALL_GROUP_VALUE;
+            const groups = Array.from(new Set(customLinks.map((entry) => normalizeGroupName(entry.group))));
+            const normalGroups = groups
+                .filter((group) => group !== DEFAULT_GROUP)
+                .sort((a, b) => a.localeCompare(b, "zh-CN"));
+            if (groups.includes(DEFAULT_GROUP)) {
+                normalGroups.push(DEFAULT_GROUP);
+            }
+            elements.linkGroupFilter.replaceChildren();
+            const all = document.createElement("option");
+            all.value = ALL_GROUP_VALUE;
+            all.textContent = "所有分组";
+            elements.linkGroupFilter.appendChild(all);
+            normalGroups.forEach((group) => {
+                const option = document.createElement("option");
+                option.value = group;
+                option.textContent = group;
+                elements.linkGroupFilter.appendChild(option);
+            });
+            elements.linkGroupFilter.value = [...elements.linkGroupFilter.options].some((o) => o.value === current) ? current : ALL_GROUP_VALUE;
+        }
+
+        function renderCustomPaths() {
+            elements.savedPaths.replaceChildren();
+            updatePathGroupFilterOptions();
+
+            const selectedGroup = elements.pathGroupFilter.value || ALL_GROUP_VALUE;
+            const query = elements.pathSearchInput.value.trim().toLowerCase();
+            const visible = customPaths.filter((entry) => {
+                const groupName = normalizeGroupName(entry.group);
+                const groupMatch = selectedGroup === ALL_GROUP_VALUE || groupName === selectedGroup;
+                if (!groupMatch) {
+                    return false;
+                }
+                if (!query) {
+                    return true;
+                }
+                return `${entry.label} ${entry.path} ${(entry.argsList || []).join(" ")}`.toLowerCase().includes(query);
+            });
+
+            if (!customPaths.length) {
+                const empty = document.createElement("p");
+                empty.className = "empty-state";
+                empty.textContent = "还没有保存的路径。";
+                elements.savedPaths.appendChild(empty);
+                return;
+            }
+
+            if (!visible.length) {
+                const empty = document.createElement("p");
+                empty.className = "empty-state";
+                empty.textContent = "未找到匹配的路径。";
+                elements.savedPaths.appendChild(empty);
+                return;
+            }
+
+            visible.forEach((entry) => {
+                const row = document.createElement("div");
+                row.className = "saved-path-item";
+                row.draggable = true;
+                row.dataset.pathId = entry.id;
+
+                row.addEventListener("dragstart", (event) => {
+                    draggingPathId = entry.id;
+                    event.dataTransfer?.setData("text/plain", entry.id);
+                    if (event.dataTransfer) {
+                        event.dataTransfer.effectAllowed = "move";
+                    }
+                    row.classList.add("dragging");
+                });
+                row.addEventListener("dragend", () => {
+                    draggingPathId = null;
+                    row.classList.remove("dragging");
+                    elements.savedPaths.querySelectorAll(".saved-path-item.drag-over")
+                        .forEach((node) => node.classList.remove("drag-over"));
+                });
+                row.addEventListener("dragover", (event) => {
+                    if (!draggingPathId || draggingPathId === entry.id) {
+                        return;
+                    }
+                    event.preventDefault();
+                    event.dataTransfer && (event.dataTransfer.dropEffect = "move");
+                    const rect = row.getBoundingClientRect();
+                    const placeAfter = event.clientX > (rect.left + rect.width / 2);
+                    row.classList.add("drag-over");
+                    row.classList.toggle("drag-over-before", !placeAfter);
+                    row.classList.toggle("drag-over-after", placeAfter);
+                });
+                row.addEventListener("dragleave", () => {
+                    row.classList.remove("drag-over");
+                    row.classList.remove("drag-over-before");
+                    row.classList.remove("drag-over-after");
+                });
+                row.addEventListener("drop", (event) => {
+                    event.preventDefault();
+                    row.classList.remove("drag-over");
+                    const placeAfter = row.classList.contains("drag-over-after");
+                    row.classList.remove("drag-over-before");
+                    row.classList.remove("drag-over-after");
+                    if (!draggingPathId || draggingPathId === entry.id) {
+                        return;
+                    }
+                    customPaths = moveItemByPlacement(customPaths, draggingPathId, entry.id, placeAfter);
+                    persistCustomPaths();
+                    renderCustomPaths();
+                });
+
+                const openBtn = document.createElement("button");
+                openBtn.type = "button";
+                openBtn.className = "saved-path-open";
+                openBtn.title = entry.path;
+                const groupName = normalizeGroupName(entry.group);
+                const argText = entry.argsList?.length
+                    ? `<span>参数: ${entry.argsList.map((item, idx) => `$${idx + 1}=${item}`).join(" | ")}</span>`
+                    : "";
+                openBtn.innerHTML = `<strong>${entry.label}</strong><span>[${groupName}] ${entry.path}</span>${argText}`;
+                openBtn.addEventListener("click", async () => {
+                    const ok = await openCustomPath(entry.path, entry.argsList || []);
+                    if (ok) {
+                        closePathModal();
+                    }
+                });
+
+                const editBtn = document.createElement("button");
+                editBtn.type = "button";
+                editBtn.className = "saved-path-delete";
+                editBtn.textContent = "编辑";
+                editBtn.addEventListener("click", () => {
+                    pathEditingId = entry.id;
+                    elements.pathLabelInput.value = entry.label;
+                    elements.pathValueInput.value = entry.path;
+                    renderPathArgsEditor(entry.argsList || []);
+                    elements.pathGroupInput.value = normalizeGroupName(entry.group) === DEFAULT_GROUP ? "" : normalizeGroupName(entry.group);
+                    updatePathFormEditingState();
+                    elements.pathLabelInput.focus();
+                });
+
+                const deleteBtn = document.createElement("button");
+                deleteBtn.type = "button";
+                deleteBtn.className = "saved-path-delete";
+                deleteBtn.textContent = "删除";
+                deleteBtn.addEventListener("click", () => {
+                    customPaths = customPaths.filter((item) => item.id !== entry.id);
+                    persistCustomPaths();
+                    renderCustomPaths();
+                });
+
+                row.append(openBtn, editBtn, deleteBtn);
+                elements.savedPaths.appendChild(row);
+            });
+        }
+
+        function renderCustomLinks() {
+            elements.savedLinks.replaceChildren();
+            updateLinkGroupFilterOptions();
+
+            const selectedGroup = elements.linkGroupFilter.value || ALL_GROUP_VALUE;
+            const query = elements.linkSearchInput.value.trim().toLowerCase();
+            const visible = customLinks.filter((entry) => {
+                const groupName = normalizeGroupName(entry.group);
+                const groupMatch = selectedGroup === ALL_GROUP_VALUE || groupName === selectedGroup;
+                if (!groupMatch) {
+                    return false;
+                }
+                if (!query) {
+                    return true;
+                }
+                return `${entry.label} ${entry.link} ${(entry.argsList || []).join(" ")}`.toLowerCase().includes(query);
+            });
+
+            if (!customLinks.length) {
+                const empty = document.createElement("p");
+                empty.className = "empty-state";
+                empty.textContent = "还没有保存的链接。";
+                elements.savedLinks.appendChild(empty);
+                return;
+            }
+
+            if (!visible.length) {
+                const empty = document.createElement("p");
+                empty.className = "empty-state";
+                empty.textContent = "未找到匹配的链接。";
+                elements.savedLinks.appendChild(empty);
+                return;
+            }
+
+            visible.forEach((entry) => {
+                const row = document.createElement("div");
+                row.className = "saved-path-item";
+                row.draggable = true;
+                row.dataset.linkId = entry.id;
+
+                row.addEventListener("dragstart", (event) => {
+                    draggingLinkId = entry.id;
+                    event.dataTransfer?.setData("text/plain", entry.id);
+                    if (event.dataTransfer) {
+                        event.dataTransfer.effectAllowed = "move";
+                    }
+                    row.classList.add("dragging");
+                });
+                row.addEventListener("dragend", () => {
+                    draggingLinkId = null;
+                    row.classList.remove("dragging");
+                    elements.savedLinks.querySelectorAll(".saved-path-item.drag-over")
+                        .forEach((node) => node.classList.remove("drag-over"));
+                });
+                row.addEventListener("dragover", (event) => {
+                    if (!draggingLinkId || draggingLinkId === entry.id) {
+                        return;
+                    }
+                    event.preventDefault();
+                    event.dataTransfer && (event.dataTransfer.dropEffect = "move");
+                    const rect = row.getBoundingClientRect();
+                    const placeAfter = event.clientX > (rect.left + rect.width / 2);
+                    row.classList.add("drag-over");
+                    row.classList.toggle("drag-over-before", !placeAfter);
+                    row.classList.toggle("drag-over-after", placeAfter);
+                });
+                row.addEventListener("dragleave", () => {
+                    row.classList.remove("drag-over");
+                    row.classList.remove("drag-over-before");
+                    row.classList.remove("drag-over-after");
+                });
+                row.addEventListener("drop", (event) => {
+                    event.preventDefault();
+                    row.classList.remove("drag-over");
+                    const placeAfter = row.classList.contains("drag-over-after");
+                    row.classList.remove("drag-over-before");
+                    row.classList.remove("drag-over-after");
+                    if (!draggingLinkId || draggingLinkId === entry.id) {
+                        return;
+                    }
+                    customLinks = moveItemByPlacement(customLinks, draggingLinkId, entry.id, placeAfter);
+                    persistCustomLinks();
+                    renderCustomLinks();
+                });
+
+                const openBtn = document.createElement("button");
+                openBtn.type = "button";
+                openBtn.className = "saved-path-open";
+                openBtn.title = entry.link;
+                const groupName = normalizeGroupName(entry.group);
+                const argText = entry.argsList?.length
+                    ? `<span>参数: ${entry.argsList.map((item, idx) => `$${idx + 1}=${item}`).join(" | ")}</span>`
+                    : "";
+                openBtn.innerHTML = `<strong>${entry.label}</strong><span>[${groupName}] ${entry.link}</span>${argText}`;
+                openBtn.addEventListener("click", async () => {
+                    const ok = await openCustomLink(entry.link, entry.argsList || []);
+                    if (ok) {
+                        closeLinkModal();
+                    }
+                });
+
+                const editBtn = document.createElement("button");
+                editBtn.type = "button";
+                editBtn.className = "saved-path-delete";
+                editBtn.textContent = "编辑";
+                editBtn.addEventListener("click", () => {
+                    linkEditingId = entry.id;
+                    elements.linkLabelInput.value = entry.label;
+                    elements.linkValueInput.value = entry.link;
+                    renderLinkArgsEditor(entry.argsList || []);
+                    elements.linkGroupInput.value = normalizeGroupName(entry.group) === DEFAULT_GROUP ? "" : normalizeGroupName(entry.group);
+                    updateLinkFormEditingState();
+                    elements.linkLabelInput.focus();
+                });
+
+                const deleteBtn = document.createElement("button");
+                deleteBtn.type = "button";
+                deleteBtn.className = "saved-path-delete";
+                deleteBtn.textContent = "删除";
+                deleteBtn.addEventListener("click", () => {
+                    customLinks = customLinks.filter((item) => item.id !== entry.id);
+                    persistCustomLinks();
+                    renderCustomLinks();
+                });
+
+                row.append(openBtn, editBtn, deleteBtn);
+                elements.savedLinks.appendChild(row);
+            });
+        }
+
+        function openPathModal() {
+            if (!rfb) {
+                toast("请先建立 VNC 连接。", "error");
+                return;
+            }
+
+            elements.pathModal.classList.add("visible");
+            elements.pathModal.setAttribute("aria-hidden", "false");
+            setViewerKeyboardMode(false);
+            renderCustomPaths();
+            window.setTimeout(() => elements.pathValueInput.focus(), 40);
+        }
+
+        function closePathModal() {
+            elements.pathModal.classList.remove("visible");
+            elements.pathModal.setAttribute("aria-hidden", "true");
+            resetPathEditing();
+            if (rfb) {
+                setViewerKeyboardMode(true);
+            }
+        }
+
+        function openLinkModal() {
+            if (!rfb) {
+                toast("请先建立 VNC 连接。", "error");
+                return;
+            }
+
+            elements.linkModal.classList.add("visible");
+            elements.linkModal.setAttribute("aria-hidden", "false");
+            setViewerKeyboardMode(false);
+            renderCustomLinks();
+            window.setTimeout(() => elements.linkValueInput.focus(), 40);
+        }
+
+        function closeLinkModal() {
+            elements.linkModal.classList.remove("visible");
+            elements.linkModal.setAttribute("aria-hidden", "true");
+            resetLinkEditing();
+            if (rfb) {
+                setViewerKeyboardMode(true);
+            }
+        }
+
+        function openClipboardModal() {
+            if (!rfb) {
+                toast("请先建立 VNC 连接。", "error");
+                return;
+            }
+
+            elements.clipboardModal.classList.add("visible");
+            elements.clipboardModal.setAttribute("aria-hidden", "false");
+            elements.clipboardModalBackdrop.classList.add("visible");
+            if (rfb) {
+                setViewerKeyboardMode(false);
+            }
+            fetchRemoteClipboard();
+        }
+
+        function closeClipboardModal() {
+            elements.clipboardModal.classList.remove("visible");
+            elements.clipboardModal.setAttribute("aria-hidden", "true");
+            elements.clipboardModalBackdrop.classList.remove("visible");
+            if (rfb) {
+                setViewerKeyboardMode(true);
+            }
+        }
+
+        function fetchRemoteClipboard() {
+            if (!rfb) {
+                elements.clipboardContent.value = "";
+                return;
+            }
+
+            elements.clipboardContent.value = lastClipboardText || "剪贴板为空";
+        }
+
+        function setQuickActionsOpen(open) {
+            quickActionsOpen = Boolean(open);
+            elements.quickActionsWrap.classList.toggle("open", quickActionsOpen);
+            elements.quickActionsBtn.setAttribute("aria-expanded", quickActionsOpen ? "true" : "false");
+            elements.quickActionsMenu.setAttribute("aria-hidden", quickActionsOpen ? "false" : "true");
+        }
+
+        function runQuickAction(action) {
+            return async (event) => {
+                event.preventDefault();
+                setQuickActionsOpen(false);
+                await action();
+            };
+        }
+
+        function updateActionButtons(connected) {
+            const disabled = !connected;
+            elements.connectBtn.disabled = connected;
+            elements.disconnectBtn.disabled = disabled;
+            elements.reconnectBtn.disabled = !currentConnection;
+            elements.explorerBtn.disabled = disabled;
+            elements.controlPanelBtn.disabled = disabled;
+            elements.cmdBtn.disabled = disabled;
+            elements.adminCmdBtn.disabled = disabled;
+            elements.desktopBtn.disabled = disabled;
+            elements.customPathBtn.disabled = disabled;
+            elements.customLinkBtn.disabled = disabled;
+            elements.clipboardViewBtn.disabled = disabled;
+            elements.cadBtn.disabled = disabled;
+        }
+
+        function loadSavedPassword(host) {
+            if (!host) {
+                return;
+            }
+
+            try {
+                const savedPasswords = JSON.parse(localStorage.getItem(SAVED_PASSWORDS_KEY) || "{}");
+                const password = savedPasswords[host];
+                if (password) {
+                    elements.passwordInput.value = password;
+                    elements.savePassword.checked = true;
+                } else if (!elements.savePassword.checked) {
+                    elements.passwordInput.value = "";
+                }
+            } catch {
+                // Ignore background lookup failures.
+            }
+        }
+
+        function persistPassword(host, password) {
+            try {
+                const savedPasswords = JSON.parse(localStorage.getItem(SAVED_PASSWORDS_KEY) || "{}");
+                if (password) {
+                    savedPasswords[host] = password;
+                } else {
+                    delete savedPasswords[host];
+                }
+                localStorage.setItem(SAVED_PASSWORDS_KEY, JSON.stringify(savedPasswords));
+            } catch {
+                toast("保存密码失败。", "error");
+            }
+        }
+
+        function destroyCurrentConnection() {
+            setViewerKeyboardMode(false);
+            releaseKeyboardLock();
+            closePathModal();
+            closeLinkModal();
+            closeClipboardModal();
+
+            if (rfb) {
+                try {
+                    rfb.disconnect();
+                } catch {
+                    // Best effort disconnect.
+                }
+                rfb = null;
+            }
+
+            elements.screen.replaceChildren();
+            updateActionButtons(false);
+            updateSessionLayout(false);
+        }
+
+        function applyDisplayPreferences(instance) {
+            instance.scaleViewport = true;
+            instance.resizeSession = false;
+            instance.clipViewport = false;
+            instance.showDotCursor = true;
+            instance.background = "#07131f";
+        }
+
+        function attachRfbListeners(instance, password) {
+            instance.addEventListener("connect", () => {
+                if (rfb !== instance) {
+                    return;
+                }
+
+                lastSecurityFailure = "";
+                updateSessionLayout(true);
+                setViewerKeyboardMode(true);
+                updateActionButtons(true);
+                setStatus(`已连接到 ${currentConnection.host}:${currentConnection.port}。`, "connected");
+                elements.desktopName.textContent = `${currentConnection.host}:${currentConnection.port}`;
+                hideOverlay();
+                focusRemoteDesktop();
+                void requestKeyboardLock();
+                toast("VNC 连接已建立。", "success");
+                
+                if (elements.savePassword.checked) {
+                    persistPassword(currentConnection.host, currentConnection.password);
+                }
+            });
+
+            instance.addEventListener("disconnect", (event) => {
+                if (rfb !== instance) {
+                    return;
+                }
+
+                const clean = Boolean(event.detail?.clean);
+                const message = clean
+                    ? "连接已断开。"
+                    : (lastSecurityFailure || "连接中断，请检查代理端口、目标主机或密码。");
+
+                setStatus(message, clean ? "disconnected" : "error");
+                showOverlay("连接已断开", message);
+                elements.desktopName.textContent = "未连接";
+                setViewerKeyboardMode(false);
+                releaseKeyboardLock();
+                rfb = null;
+                updateActionButtons(false);
+                updateSessionLayout(false);
+                
+                if (customName) {
+                    document.title = originalTitle;
+                }
+            });
+
+            instance.addEventListener("credentialsrequired", () => {
+                if (rfb !== instance) {
+                    return;
+                }
+
+                if (!password) {
+                    const message = "服务端要求密码认证，但当前没有填写密码。";
+                    lastSecurityFailure = message;
+                    setStatus(message, "error");
+                    showOverlay("需要密码", message);
+                    toast(message, "error");
+                    instance.disconnect();
+                    return;
+                }
+
+                instance.sendCredentials({ password });
+            });
+
+            instance.addEventListener("securityfailure", (event) => {
+                if (rfb !== instance) {
+                    return;
+                }
+
+                const reason = event.detail?.reason
+                    || `安全协商失败，状态码 ${event.detail?.status ?? "未知"}`;
+                lastSecurityFailure = reason;
+                setStatus(reason, "error");
+                showOverlay("认证失败", reason);
+                toast(reason, "error");
+            });
+
+            instance.addEventListener("desktopname", (event) => {
+                if (rfb !== instance) {
+                    return;
+                }
+                elements.desktopName.textContent = event.detail?.name || `${currentConnection.host}:${currentConnection.port}`;
+            });
+
+            instance.addEventListener("bell", () => {
+                if (rfb === instance) {
+                    toast("远程主机发出了提示音。");
+                }
+            });
+
+            instance.addEventListener("clipboard", (event) => {
+                if (rfb === instance) {
+                    void handleRemoteClipboard(event);
+                }
+            });
+        }
+
+        function connectVNC() {
+            const host = elements.hostInput.value.trim();
+            const port = Number(elements.portInput.value || 5900);
+            const password = elements.passwordInput.value;
+
+            if (!host) {
+                toast("请输入目标主机。", "error");
+                return;
+            }
+
+            if (!Number.isInteger(port) || port < 1 || port > 65535) {
+                toast("端口必须在 1 到 65535 之间。", "error");
+                return;
+            }
+
+            currentConnection = { host, port, password };
+            lastSecurityFailure = "";
+            saveRecentConnection(host, port, customName);
+
+            destroyCurrentConnection();
+            currentConnection = { host, port, password };
+            showOverlay("正在连接", `通过 WebSocket 代理连接 ${host}:${port} ...`);
+            setStatus(`正在连接 ${host}:${port} ...`, "connecting");
+            updateActionButtons(false);
+
+            try {
+                const wsUrl = buildWebSocketUrl(host, port);
+                const credentials = password ? { password } : undefined;
+                rfb = new RFB(elements.screen, wsUrl, { credentials, shared: true });
+                applyDisplayPreferences(rfb);
+                attachRfbListeners(rfb, password);
+            } catch (error) {
+                rfb = null;
+                const message = error instanceof Error ? error.message : String(error);
+                setStatus(`创建连接失败: ${message}`, "error");
+                showOverlay("创建连接失败", message);
+                toast(`创建连接失败: ${message}`, "error");
+                updateSessionLayout(false);
+                updateActionButtons(false);
+            }
+        }
+
+        async function testConnection() {
+            const host = elements.hostInput.value.trim();
+            const port = Number(elements.portInput.value || 5900);
+            const password = elements.passwordInput.value;
+
+            if (!host) {
+                toast("请输入目标主机。", "error");
+                return;
+            }
+
+            setStatus(`正在测试 ${host}:${port} ...`, "connecting");
+
+            try {
+                const response = await fetch("/api/test_connection", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ host, port, password }),
+                });
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    if (data.partial) {
+                        // Partial success - server reachable but auth unverified
+                        setStatus(data.message, "connected");
+                        toast(data.message, "warning");
+                    } else {
+                        setStatus(data.message, "connected");
+                        toast(data.message, "success");
+                    }
+                } else {
+                    setStatus(data.message || "测试失败。", "error");
+                    toast(data.message || "测试失败。", "error");
+                }
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                setStatus(`测试失败: ${message}`, "error");
+                toast(`测试失败: ${message}`, "error");
+            }
+        }
+
+        function disconnectVNC() {
+            destroyCurrentConnection();
+            setStatus("连接已断开。", "disconnected");
+            elements.desktopName.textContent = "未连接";
+            showOverlay("已断开", "远程连接已关闭。");
+        }
+
+        // Browsers do not guarantee that a WebSocket is closed immediately
+        // during a refresh. Explicitly close the RFB session so the proxy can
+        // release its VNC TCP connection before the next page is initialized.
+        window.addEventListener("pagehide", () => {
+            try {
+                if (rfb) {
+                    rfb.disconnect();
+                    rfb = null;
+                }
+            } catch (_) {
+                // Page teardown is best effort.
+            }
+        });
+
+        async function reconnectVNC() {
+            if (!currentConnection) {
+                toast("当前没有可重连的会话。");
+                return;
+            }
+
+            elements.hostInput.value = currentConnection.host;
+            elements.portInput.value = currentConnection.port;
+            await loadSavedPassword(currentConnection.host);
+            connectVNC();
+        }
+
+        async function toggleFullscreen() {
+            const target = elements.viewerCard;
+            if (!document.fullscreenElement) {
+                await target.requestFullscreen();
+            } else {
+                await document.exitFullscreen();
+            }
+        }
+
+        function syncFullscreenUi() {
+            elements.fullscreenBtn.textContent = document.fullscreenElement ? "退出全屏" : "全屏";
+            if (document.fullscreenElement && rfb) {
+                setViewerKeyboardMode(true);
+                void requestKeyboardLock();
+            } else {
+                releaseKeyboardLock();
+            }
+            window.requestAnimationFrame(syncToolbarOffset);
+        }
+
+        function charToKeysym(char) {
+            const codepoint = char.codePointAt(0);
+            if (codepoint === undefined) {
+                return null;
+            }
+            if (codepoint <= 0xff) {
+                return codepoint;
+            }
+            return 0x01000000 | codepoint;
+        }
+
+        async function sendChord(keys) {
+            if (!rfb) {
+                return;
+            }
+
+            for (const key of keys) {
+                rfb.sendKey(key.keysym, key.code, true);
+                await sleep(18);
+            }
+
+            await sleep(70);
+
+            for (const key of [...keys].reverse()) {
+                rfb.sendKey(key.keysym, key.code, false);
+                await sleep(18);
+            }
+        }
+
+        async function tapKey(keysym, code) {
+            if (!rfb) {
+                return;
+            }
+
+            rfb.sendKey(keysym, code, true);
+            await sleep(28);
+            rfb.sendKey(keysym, code, false);
+            await sleep(22);
+        }
+
+        async function typeText(text) {
+            if (!rfb) {
+                return;
+            }
+
+            for (const char of text) {
+                if (char === "\n") {
+                    await tapKey(KeyTable.XK_Return, "Enter");
+                    continue;
+                }
+
+                const keysym = charToKeysym(char);
+                if (keysym === null) {
+                    continue;
+                }
+
+                rfb.sendKey(keysym);
+                await sleep(22);
+            }
+        }
+        async function ensureRemoteShortcutTarget() {
+            if (!rfb) {
+                toast("请先建立 VNC 连接。", "error");
+                return false;
+            }
+
+            setViewerKeyboardMode(true);
+            focusRemoteDesktop();
+            await sleep(90);
+            return true;
+        }
+
+        async function openStartMenu() {
+            // Ctrl+Esc opens Start menu (search box auto-focused)
+            await sendChord([
+                { keysym: KeyTable.XK_Control_L, code: "ControlLeft" },
+                { keysym: KeyTable.XK_Escape, code: "Escape" },
+            ]);
+            await sleep(400);
+        }
+
+        async function runRemoteCommand(command) {
+            if (!await ensureRemoteShortcutTarget()) {
+                return;
+            }
+
+            const originalClipboardSync = clipboardSyncDisabled;
+            clipboardSyncDisabled = false;
+            try {
+                await openStartMenu();
+                await performRemotePaste(command, { quiet: true });
+                await sleep(150);
+                await tapKey(KeyTable.XK_Return, "Enter");
+            } finally {
+                clipboardSyncDisabled = originalClipboardSync;
+            }
+        }
+        async function pasteText(command) {
+            if (!await ensureRemoteShortcutTarget()) {
+                return;
+            }
+
+            const originalClipboardSync = clipboardSyncDisabled;
+            clipboardSyncDisabled = false;
+            try {
+                await performRemotePaste(command, { quiet: true });
+            } finally {
+                clipboardSyncDisabled = originalClipboardSync;
+            }
+        }
+
+        function quoteRunArgument(value) {
+            return `"${value.replace(/"/g, '""')}"`;
+        }
+
+        async function openExplorer() {
+            if (!await ensureRemoteShortcutTarget()) {
+                return;
+            }
+
+            await openStartMenu();
+            await performRemotePaste("explorer", { quiet: true });
+            await sleep(150);
+            await tapKey(KeyTable.XK_Return, "Enter");
+        }
+
+        async function openControlPanel() {
+                await runRemoteCommand("control");
+        }
+
+        async function openCmd() {
+                await runRemoteCommand("cmd");
+        }
+
+        async function openAdminCmd() {
+                toast("如果远端出现 UAC 安全桌面，普通 TightVNC 会话通常无法继续操作。");
+                await runRemoteCommand('powershell -Command "Start-Process cmd -Verb RunAs"');
+        }
+
+
+
+        async function showDesktop() {
+            if (!await ensureRemoteShortcutTarget()) {
+                return;
+            }
+
+            await sendChord([
+                { keysym: KeyTable.XK_Super_L, code: "MetaLeft" },
+                { keysym: charToKeysym("d"), code: "KeyD" },
+            ]);
+        }
+
+        async function openCustomPath(pathTemplate, argsList = []) {
+            if (!pathTemplate.trim()) {
+                toast("路径不能为空。", "error");
+                return false;
+            }
+            const resolved = resolvePathCommand(pathTemplate.trim(), argsList);
+            if (!resolved.ok) {
+                toast(`参数不匹配：${resolved.message}`, "error");
+                return false;
+            }
+
+            await runRemoteCommand(`explorer ${quoteRunArgument(resolved.path)}`);
+            return true;
+        }
+
+        async function openCustomLink(link, argsList = []) {
+            if (!link.trim()) {
+                toast("链接不能为空。", "error");
+                return false;
+            }
+            const resolved = resolveLinkCommand(link.trim(), argsList);
+            if (!resolved.ok) {
+                toast(`参数不匹配：${resolved.message}`, "error");
+                return false;
+            }
+            await runRemoteCommand(resolved.command);
+            return true;
+        }
+
+        function exportAllData() {
+            const data = {
+                recentConnections: getRecentConnections(),
+                customPaths: customPaths,
+                customLinks: customLinks,
+                savedPasswords: JSON.parse(localStorage.getItem(SAVED_PASSWORDS_KEY) || "{}"),
+            };
+            const json = JSON.stringify(data, null, 2);
+            const blob = new Blob([json], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `vnc-web-client-data-${new Date().toISOString().slice(0, 10)}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            toast("数据已导出。", "success");
+        }
+
+        function importAllData(file) {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                try {
+                    const data = JSON.parse(event.target.result);
+                    if (!data || typeof data !== "object") {
+                        toast("导入失败：JSON 格式无效。", "error");
+                        return;
+                    }
+
+                    if (Array.isArray(data.recentConnections)) {
+                        localStorage.setItem(RECENT_CONNECTIONS_KEY, JSON.stringify(data.recentConnections.slice(0, 10)));
+                    }
+                    if (Array.isArray(data.customPaths)) {
+                        customPaths = data.customPaths.map(normalizePathEntryData).filter(Boolean);
+                        persistCustomPaths();
+                    }
+                    if (Array.isArray(data.customLinks)) {
+                        customLinks = data.customLinks.map(normalizeLinkEntryData).filter(Boolean);
+                        persistCustomLinks();
+                    }
+                    if (data.savedPasswords && typeof data.savedPasswords === "object") {
+                        localStorage.setItem(SAVED_PASSWORDS_KEY, JSON.stringify(data.savedPasswords));
+                    }
+
+                    renderRecentConnections();
+                    renderCustomPaths();
+                    renderCustomLinks();
+                    toast("数据已导入并覆盖当前缓存。", "success");
+                } catch {
+                    toast("导入失败：文件内容不是有效的 JSON。", "error");
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        elements.connectionForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            connectVNC();
+        });
+
+        elements.disconnectBtn.addEventListener("click", disconnectVNC);
+        elements.testBtn.addEventListener("click", testConnection);
+        elements.quickActionsBtn.addEventListener("click", (event) => {
+            event.stopPropagation();
+            setViewerKeyboardMode(false);
+            setQuickActionsOpen(!quickActionsOpen);
+        });
+        elements.reconnectBtn.addEventListener("click", runQuickAction(reconnectVNC));
+        elements.connectionStatusBtn.addEventListener("click", () => {
+            setSidebarOpen(!sidebarOpen);
+        });
+        elements.sideHiddenBtn.addEventListener("click", () => {
+            setSidebarOpen(!sidebarOpen);
+        });
+        elements.explorerBtn.addEventListener("click", runQuickAction(openExplorer));
+        elements.controlPanelBtn.addEventListener("click", runQuickAction(openControlPanel));
+        elements.cmdBtn.addEventListener("click", runQuickAction(openCmd));
+        elements.adminCmdBtn.addEventListener("click", runQuickAction(openAdminCmd));
+        elements.desktopBtn.addEventListener("click", runQuickAction(showDesktop));
+        elements.customPathBtn.addEventListener("click", openPathModal);
+        elements.customLinkBtn.addEventListener("click", openLinkModal);
+        elements.clipboardViewBtn.addEventListener("click", openClipboardModal);
+        elements.closeClipboardModalBtn.addEventListener("click", closeClipboardModal);
+        elements.refreshClipboardBtn.addEventListener("click", fetchRemoteClipboard);
+        elements.cadBtn.addEventListener("click", runQuickAction(async () => {
+            if (rfb) {
+                rfb.sendCtrlAltDel();
+            }
+        }));
+        elements.fullscreenBtn.addEventListener("click", toggleFullscreen);
+        elements.exportDataBtn.addEventListener("click", exportAllData);
+        elements.importDataBtn.addEventListener("click", () => {
+            elements.importDataFile.click();
+        });
+        elements.importDataFile.addEventListener("change", (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                importAllData(file);
+                event.target.value = "";
+            }
+        });
+
+        elements.clearRecentBtn.addEventListener("click", () => {
+            localStorage.removeItem(RECENT_CONNECTIONS_KEY);
+            renderRecentConnections();
+        });
+
+        elements.hostInput.addEventListener("change", async () => {
+            await loadSavedPassword(elements.hostInput.value.trim());
+        });
+
+        elements.togglePasswordBtn.addEventListener("click", () => {
+            const hidden = elements.passwordInput.type === "password";
+            elements.passwordInput.type = hidden ? "text" : "password";
+            elements.togglePasswordBtn.textContent = hidden ? "隐藏" : "显示";
+        });
+
+        elements.clipboardSyncToggle.addEventListener("change", () => {
+            clipboardSyncDisabled = !elements.clipboardSyncToggle.checked;
+        });
+
+        elements.screen.addEventListener("pointerdown", () => {
+            setViewerKeyboardMode(true);
+            void flushPendingRemoteClipboard();
+        });
+
+        window.addEventListener("pointerdown", () => {
+            void flushPendingRemoteClipboard();
+        }, true);
+        window.addEventListener("pointerdown", (event) => {
+            const target = event.target;
+            if (!(target instanceof Node)) {
+                return;
+            }
+            if (!elements.quickActionsWrap.contains(target)) {
+                setQuickActionsOpen(false);
+            }
+        }, true);
+        window.addEventListener("keydown", () => {
+            void flushPendingRemoteClipboard();
+        }, true);
+        window.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") {
+                setQuickActionsOpen(false);
+            }
+        });
+
+        elements.sidebar.addEventListener("focusin", () => {
+            setViewerKeyboardMode(false);
+        });
+
+        elements.pathModalBackdrop.addEventListener("click", closePathModal);
+        elements.closePathModalBtn.addEventListener("click", closePathModal);
+
+        elements.pathForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            const path = elements.pathValueInput.value.trim();
+            const label = elements.pathLabelInput.value.trim();
+            const argsList = getPathArgsFromEditor();
+            const group = normalizeGroupName(elements.pathGroupInput.value);
+
+            if (!path) {
+                toast("路径不能为空。", "error");
+                return;
+            }
+
+            if (customPaths.some((entry) =>
+                normalizeCompareText(entry.path) === normalizeCompareText(path)
+                && sameArgsList(entry.argsList || [], argsList)
+                && entry.id !== pathEditingId)) {
+                toast("该路径和参数组合已经存在。", "error");
+                return;
+            }
+
+            if (pathEditingId) {
+                customPaths = customPaths.map((entry) => (entry.id === pathEditingId
+                    ? { ...entry, label: (label || path), path, argsList, group }
+                    : entry));
+                toast("路径已更新。", "success");
+            } else {
+                const newEntry = normalizePathEntry(label, path);
+                newEntry.argsList = argsList;
+                newEntry.group = group;
+                customPaths = [newEntry, ...customPaths];
+                toast("路径已新增。", "success");
+            }
+            persistCustomPaths();
+            renderCustomPaths();
+            resetPathEditing();
+            elements.pathValueInput.focus();
+        });
+        elements.saveAsPathBtn.addEventListener("click", (event) => {
+            event.preventDefault();
+            const path = elements.pathValueInput.value.trim();
+            const label = elements.pathLabelInput.value.trim();
+            const argsList = getPathArgsFromEditor();
+            const group = normalizeGroupName(elements.pathGroupInput.value);
+
+            if (!path) {
+                toast("路径不能为空。", "error");
+                return;
+            }
+
+            if (customPaths.some((entry) =>
+                normalizeCompareText(entry.path) === normalizeCompareText(path)
+                && sameArgsList(entry.argsList || [], argsList))) {
+                toast("该路径和参数组合已经存在。", "error");
+                return;
+            }
+
+            const newEntry = normalizePathEntry(label, path);
+            newEntry.argsList = argsList;
+            newEntry.group = group;
+            customPaths = [newEntry, ...customPaths];
+            persistCustomPaths();
+            renderCustomPaths();
+            toast("路径已另存为新项。", "success");
+        });
+        elements.executePathBtn.addEventListener("click", async (event) => {
+            event.preventDefault();
+            const path = elements.pathValueInput.value.trim();
+            const argsList = getPathArgsFromEditor();
+            const ok = await openCustomPath(path, argsList);
+            if (ok) {
+                closePathModal();
+            }
+        });
+        elements.executeLinkBtn.addEventListener("click", async (event) => {
+            event.preventDefault();
+            const link = elements.linkValueInput.value.trim();
+            const argsList = getLinkArgsFromEditor();
+            const ok = await openCustomLink(link, argsList);
+            if (ok) {
+                closeLinkModal();
+            }
+        });
+
+
+
+
+
+        elements.linkModalBackdrop.addEventListener("click", closeLinkModal);
+        elements.closeLinkModalBtn.addEventListener("click", closeLinkModal);
+
+        elements.linkForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            const link = elements.linkValueInput.value.trim();
+            const label = elements.linkLabelInput.value.trim();
+            const argsList = getLinkArgsFromEditor();
+            const group = normalizeGroupName(elements.linkGroupInput.value);
+
+            if (!link) {
+                toast("链接不能为空。", "error");
+                return;
+            }
+
+            if (customLinks.some((entry) =>
+                normalizeCompareText(entry.link) === normalizeCompareText(link)
+                && sameArgsList(entry.argsList || [], argsList)
+                && entry.id !== linkEditingId)) {
+                toast("该链接和参数组合已经存在。", "error");
+                return;
+            }
+
+            if (linkEditingId) {
+                customLinks = customLinks.map((entry) => (entry.id === linkEditingId
+                    ? { ...entry, label: (label || link), link, argsList, group }
+                    : entry));
+                toast("链接已更新。", "success");
+            } else {
+                const newEntry = normalizeLinkEntry(label, link);
+                newEntry.argsList = argsList;
+                newEntry.group = group;
+                customLinks = [newEntry, ...customLinks];
+                toast("链接已新增。", "success");
+            }
+            persistCustomLinks();
+            renderCustomLinks();
+            resetLinkEditing();
+            elements.linkValueInput.focus();
+        });
+        elements.saveAsLinkBtn.addEventListener("click", (event) => {
+            event.preventDefault();
+            const link = elements.linkValueInput.value.trim();
+            const label = elements.linkLabelInput.value.trim();
+            const argsList = getLinkArgsFromEditor();
+            const group = normalizeGroupName(elements.linkGroupInput.value);
+
+            if (!link) {
+                toast("链接不能为空。", "error");
+                return;
+            }
+
+            if (customLinks.some((entry) =>
+                normalizeCompareText(entry.link) === normalizeCompareText(link)
+                && sameArgsList(entry.argsList || [], argsList))) {
+                toast("该链接和参数组合已经存在。", "error");
+                return;
+            }
+
+            const newEntry = normalizeLinkEntry(label, link);
+            newEntry.argsList = argsList;
+            newEntry.group = group;
+            customLinks = [newEntry, ...customLinks];
+            persistCustomLinks();
+            renderCustomLinks();
+            toast("链接已另存为新项。", "success");
+        });
+
+        elements.cancelEditPathBtn.addEventListener("click", () => {
+            resetPathEditing();
+            elements.pathValueInput.focus();
+        });
+        elements.addPathArgBtn.addEventListener("click", () => {
+            const next = getPathArgsFromEditor();
+            next.push("");
+            renderPathArgsEditor(next);
+            const allInputs = elements.pathArgsList.querySelectorAll("input[data-path-arg-input]");
+            allInputs[allInputs.length - 1]?.focus();
+        });
+        elements.cancelEditLinkBtn.addEventListener("click", () => {
+            resetLinkEditing();
+            elements.linkValueInput.focus();
+        });
+        elements.addLinkArgBtn.addEventListener("click", () => {
+            const next = getLinkArgsFromEditor();
+            next.push("");
+            renderLinkArgsEditor(next);
+            const last = elements.linkArgsList.querySelector("input[data-link-arg-input]:last-of-type");
+            last?.focus();
+        });
+        elements.pathSearchInput.addEventListener("input", renderCustomPaths);
+        elements.linkSearchInput.addEventListener("input", renderCustomLinks);
+        elements.pathGroupFilter.addEventListener("change", renderCustomPaths);
+        elements.linkGroupFilter.addEventListener("change", renderCustomLinks);
+
+        window.addEventListener("keydown", trapKeyboardEvent, true);
+        window.addEventListener("keyup", trapKeyboardEvent, true);
+        window.addEventListener("keypress", trapKeyboardEvent, true);
+        window.addEventListener("paste", handlePasteEvent, true);
+        window.addEventListener("resize", syncViewportHeight);
+        window.visualViewport?.addEventListener("resize", syncViewportHeight);
+        document.addEventListener("fullscreenchange", syncFullscreenUi);
+
+        syncViewportHeight();
+        renderRecentConnections();
+        renderCustomPaths();
+        renderCustomLinks();
+        renderPathArgsEditor([]);
+        renderLinkArgsEditor([]);
+        updatePathFormEditingState();
+        updateLinkFormEditingState();
+        setStatus("等待连接。", "idle");
+        updateActionButtons(false);
+        updateSessionLayout(false);
+        syncFullscreenUi();
+        
+        if (elements.hostInput.value.trim()) {
+            loadSavedPassword(elements.hostInput.value.trim());
+        }
+
+        if (config.autoConnect && elements.hostInput.value.trim()) {
+            window.setTimeout(connectVNC, 260);
+        }
+    </script>
+</body>
+</html>
