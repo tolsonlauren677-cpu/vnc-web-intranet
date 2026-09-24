@@ -478,6 +478,7 @@
             const url = new URL(`${scheme}://${proxyHost}:${config.proxyPort}${config.proxyPath}`);
             url.searchParams.set("host", host);
             url.searchParams.set("port", String(port));
+            url.searchParams.set("ra2", "1");
             return url.toString();
         }
 
@@ -1892,13 +1893,20 @@
             setStatus(`正在连接 ${host}:${port} ...`, "connecting");
             updateActionButtons(false);
 
+            let channel;
             try {
-                const wsUrl = buildWebSocketUrl(host, port);
+                channel = new WebSocket(buildWebSocketUrl(host, port));
+                // The proxy negotiates RA2 when offered and otherwise forwards
+                // the ordinary RFB handshake. Credentials stay out of URLs.
+                channel.addEventListener("open", () => {
+                    channel.send(JSON.stringify({ type: "credentials", password }));
+                }, { once: true });
                 const credentials = password ? { password } : undefined;
-                rfb = new RFB(elements.screen, wsUrl, { credentials, shared: true });
+                rfb = new RFB(elements.screen, channel, { credentials, shared: true });
                 applyDisplayPreferences(rfb);
                 attachRfbListeners(rfb, password);
             } catch (error) {
+                if (channel) channel.close();
                 rfb = null;
                 const message = error instanceof Error ? error.message : String(error);
                 setStatus(`创建连接失败: ${message}`, "error");
